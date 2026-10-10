@@ -1,15 +1,29 @@
 use std::env;
 use std::path::PathBuf;
 use std::fs;
+use reqwest;
 
 pub struct Launcher {
     name: String,
 }
 
 impl Launcher {
+    pub fn new() -> Launcher {
+        Launcher { name: "BareBones".to_string(),}
+    }
+
     pub fn start(&self) {
         println!("Starting {}", self.name);
         self.install();
+        
+        match self.fetch_manifest() {
+            Ok(manifest) => {
+                println!("Bytes arrived: {}", manifest.len())
+            }
+            Err(e) => {
+                println!("Error while fetching minecraft manifest: {e}")
+            }
+        }
     }
 
     fn install(&self) {
@@ -37,8 +51,10 @@ impl Launcher {
         Ok(PathBuf::from(appdata).join(".minecraft"))
     }
 
-    pub fn new() -> Launcher {
-        Launcher { name: "BareBones".to_string(),}
+    fn fetch_manifest(&self) -> Result<String, reqwest::Error> {
+        // fetching minecraft manifest
+        let manifest = reqwest::blocking::get("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")?.text()?;
+        Ok(manifest)
     }
 
 }
