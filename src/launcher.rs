@@ -1,7 +1,6 @@
 use std::env;
 use std::path::PathBuf;
 use std::fs;
-use reqwest;
 
 pub struct Launcher {
     name: String,
@@ -16,9 +15,48 @@ impl Launcher {
         println!("Starting {}", self.name);
         self.install();
         
-        match self.fetch_manifest() {
+        match self.fetch_text("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json") {
             Ok(manifest) => {
-                println!("Bytes arrived: {}", manifest.len())
+                println!("Bytes arrived of manifest: {}", manifest.len());
+
+                let manifest_json: Result<serde_json::Value, serde_json::Error> = serde_json::from_str(&manifest);
+
+                match manifest_json {
+                    Ok(parsed) => {
+                        let versions  = parsed["versions"].as_array();
+
+                        if let Some(value) = versions {
+                            for i in value {
+                                if i["id"] == "26.3" {
+                                    if let Some(url) = i["url"].as_str() {
+                                        match self.fetch_text(url) {
+                                            Ok(file) => {
+                                                let version_json: Result<serde_json::Value, serde_json::Error> = serde_json::from_str(&file);
+
+                                                match version_json {
+                                                    Ok(parsed) => {println!("{}", parsed["javaVersion"]["majorVersion"])}
+                                                    Err(e) => {println!("Cannot parse 26.3 version file: {}", e)}
+                                                }
+                                            }
+                                            Err(e) => {println!("Error fetching 26.3 version file: {}", e)}
+                                        }
+                                    }
+                                    else {
+                                        println!("Cannot get the url of 26.3")
+                                    }
+
+                                    break;
+                                }
+                            }
+                        }
+                        else {
+                            println!("Error: manifest 'versions' field is missing or not a list.")
+                        }
+                        // println!("{}", parsed["versions"][0]["url"]);
+                    }
+                    Err(e) => println!("Error parsing version manifest: {}", e)
+                }
+                
             }
             Err(e) => {
                 println!("Error while fetching minecraft manifest: {e}")
@@ -51,10 +89,9 @@ impl Launcher {
         Ok(PathBuf::from(appdata).join(".minecraft"))
     }
 
-    fn fetch_manifest(&self) -> Result<String, reqwest::Error> {
-        // fetching minecraft manifest
-        let manifest = reqwest::blocking::get("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")?.text()?;
-        Ok(manifest)
+    fn fetch_text(&self, url: &str) -> Result<String, reqwest::Error> {
+        let idfk = reqwest::blocking::get(url)?.text()?;
+        Ok(idfk)
     }
 
 }
