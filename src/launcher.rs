@@ -1,6 +1,6 @@
 use std::env;
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 
 pub struct Launcher {
     name: String,
@@ -8,90 +8,66 @@ pub struct Launcher {
 
 impl Launcher {
     pub fn new() -> Launcher {
-        Launcher { name: "BareBones".to_string(),}
+        Launcher { name: "BareBones".to_string() }
     }
 
     pub fn start(&self) {
         println!("Starting {}", self.name);
         self.install();
-        
-        match self.fetch_text("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json") {
-            Ok(manifest) => {
-                println!("Bytes arrived of manifest: {}", manifest.len());
 
-                let manifest_json: Result<serde_json::Value, serde_json::Error> = serde_json::from_str(&manifest);
-
-                match manifest_json {
-                    Ok(parsed) => {
-                        let versions  = parsed["versions"].as_array();
-
-                        if let Some(value) = versions {
-                            for i in value {
-                                if i["id"] == "26.3" {
-                                    if let Some(url) = i["url"].as_str() {
-                                        match self.fetch_text(url) {
-                                            Ok(file) => {
-                                                let version_json: Result<serde_json::Value, serde_json::Error> = serde_json::from_str(&file);
-
-                                                match version_json {
-                                                    Ok(parsed) => {println!("{}", parsed["javaVersion"]["majorVersion"])}
-                                                    Err(e) => {println!("Cannot parse 26.3 version file: {}", e)}
-                                                }
-                                            }
-                                            Err(e) => {println!("Error fetching 26.3 version file: {}", e)}
-                                        }
-                                    }
-                                    else {
-                                        println!("Cannot get the url of 26.3")
-                                    }
-
-                                    break;
-                                }
-                            }
-                        }
-                        else {
-                            println!("Error: manifest 'versions' field is missing or not a list.")
-                        }
-                        // println!("{}", parsed["versions"][0]["url"]);
-                    }
-                    Err(e) => println!("Error parsing version manifest: {}", e)
-                }
-                
-            }
-            Err(e) => {
-                println!("Error while fetching minecraft manifest: {e}")
-            }
+        match self.java_version_for("26.3") {
+            Ok(version) => println!("26.3 needs Java {}", version),
+            Err(e) => println!("Error: {}", e),
         }
     }
 
-    fn install(&self) {
-        // primary install function for minecraft
-        match self.minecraft_dir() {
-            Ok(dir) => {
-                match fs::create_dir_all(&dir) {
-                    Ok(()) => {
-                        println!("Created .minecraft in Path: {}", dir.display())
-                    }
-                    Err(e) => {
-                        println!("Error while creating directory. {}", e)
-                    }
-                }
-            }
-            Err(e) => {
-                println!("Cannot find the APPDATA path: {}", e)
-            }
-        }
+    fn java_version_for(&self, wanted: &str) -> Result<u64, String> {
+        let manifest = self.fetch_json("https://piston-meta.mojang.com/mc/game/version_manifest_v2.json")?;
+        let url = self
+            .find_version_url(&manifest, wanted)
+            .ok_or(format!("version {} is not in the manifest", wanted))?;
+
+        let version_file = self.fetch_json(&url)?;
+        version_file["javaVersion"]["majorVersion"]
+            .as_u64()
+            .ok_or("version file has no javaVersion".to_string())
     }
 
-    fn minecraft_dir(&self) -> Result<PathBuf, env::VarError> { 
-        // checks for APPDATA and if true joins .minecraft
-        let appdata = env::var("APPDATA")?;
-        Ok(PathBuf::from(appdata).join(".minecraft"))
+    fn find_version_url(&self, manifest: &serde_json::Value, wanted: &str) -> Option<String> {
+        let versions = manifest["versions"].as_array()?;
+        for entry in versions {
+            if entry["id"] == wanted {
+                let url = entry["url"].as_str()?;
+                return Some(url.to_string());
+            }
+        }
+        None
+    }
+
+    fn fetch_json(&self, url: &str) -> Result<serde_json::Value, String> {
+        let text = self
+            .fetch_text(url)
+            .map_err(|e| format!("download of {} failed: {}", url, e))?;
+        serde_json::from_str(&text).map_err(|e| format!("could not parse {}: {}", url, e))
     }
 
     fn fetch_text(&self, url: &str) -> Result<String, reqwest::Error> {
-        let idfk = reqwest::blocking::get(url)?.text()?;
-        Ok(idfk)
+        let body = reqwest::blocking::get(url)?.text()?;
+        Ok(body)
     }
 
+    fn install(&self) {
+        match self.minecraft_dir() {
+            Ok(dir) => match fs::create_dir_all(&dir) {
+                Ok(()) => println!("Created .minecraft in Path: {}", dir.display()),
+                Err(e) => println!("Error while creating directory. {}", e)
+            }
+            Err(e) => println!("Cannot find the APPDATA path: {}", e)
+        }
+    }
+
+    fn minecraft_dir(&self) -> Result<PathBuf, env::VarError> {
+        let appdata = env::var("APPDATA")?;
+        Ok(PathBuf::from(appdata).join(".minecraft"))
+    }
 }
